@@ -10,109 +10,174 @@ The client subscribes and unsubscribes to data updates using HTTP paths as "chan
 
 When the server updates a record, it sends either a partial update or full copy of the record to the client, or sends no data at all.
 
-The syntax used by the client is terse, yielding small WebSocket payload frame sizes, yet is expressive enough to be readable by a human.
+The messages passed between client and server are JSON serialized, using ordered arrays instead of named properties.
 
-## Example
+---
 
-After connecting and authenticating, the client subscribes to one or more channels by sending a JSON serialized string (described later in this document):
+## Client Message Structure
+
+Messages sent from the client to the server look like this:
 
 ```json
 [
-	"0",
-	"subscribe",
+	"001",
+	"SUBSCRIBE",
 	[
 		[ "/articles/123", "FULL" ],
-		[ "/authors/456", "DIFF" ],
-		[ "/comments?include=author", "PING" ]
+		[ "/authors/456", "DIFF" ]
 	]
 ]
 ```
 
-The server responds asynchronously with a status code and optional payload:
+### Index 0: Message Identifier
+
+Each message sent to the client must specify a valid [request identifier](#request-identifier).
+
+Since message passing is asynchronous, the message identifier is included on the server response to let the client connect responses to requests.
+
+#### Index 1: Request Type
+
+The string must be a valid [request type](#request-type).
+
+The client makes requests to the server, such as subscribing or unsubscribing to paths, or listing the current subscriptions.
+
+#### Index 2: Request Payload
+
+A payload, as defined by the [request type](#request-type), such as a list of paths to subscribe to.
+
+---
+
+## Server Response Structure
+
+Messages sent from the server to the client in response to a request look like this:
 
 ```json
 [
 	"0",
-	200,
+	"200",
 	"Subscribed to all paths",
-	[ "a", "b", "c" ]
+	[ "100", "101", "102" ]
 ]
 ```
 
-The client unsubscribes to one or more channels in the same way:
+#### Index 0: Message Identifier
 
-```json
-[
-	"1",
-	"unsubscribe",
-	[ "a", "c" ]
-]
-```
+This array element *must* be the [request identifier](#request-identifier) provided by that client request.
 
-The server responds asynchronously in a similar way:
+#### Index 1: Status Code
 
-```json
-[
-	"0",
-	200,
-	"Unsubscribed from all paths"
-]
-```
+The HTTP status code of the response, expressed as a string value.
 
-The client can request a list of all subscribed paths:
+#### Index 2: Response Title
 
-```json
-[
-	"2",
-	"list"
-]
-```
+A short, human-readable summary of the problem that **SHOULD NOT** change from occurrence to occurrence of the problem, except for purposes of localization.
 
-And the server responds asynchronously in a similar way:
+#### Index 3: Response body
 
-```json
-[
-	"2",
-	200,
-	"List of subscribed paths",
-	[
-		[ "c", "/authors/456", "DIFF" ]
-	]
-]
-```
+The payload response for the request.
 
-When a resource is updated, the server sends updates to all subscribed clients:
+---
+
+## Server Update Structure
+
+Resource updates sent from the server to the client look like this:
 
 ```json
 [
 	null,
-	"/authors/456",
+	"101",
 	"DIFF",
 	{
-		"id": "456",
-		"type": "author",
-		"attributes": {
-			"books": 3
+		"data": {
+			"id": "456",
+			"type": "author",
+			"attributes": {
+				"books": 3
+			}
 		}
 	}
 ]
 ```
 
+#### Index 0: Unused
+
+In a response message, this value would be an identifier. An update message is not a response, so it does not not start with an identifier.
+
+This value must be exactly `null`.
+
+#### Index 1: Subscription Identifier
+
+If the update message is associated with a subscription, this value would be the [subscription identifier](#subscription-identifier), otherwise it must be exactly `null`.
+
+#### Index 2: Update Type
+
+The string value of a valid [update type](#update-types).
+
+#### Index 3: Body
+
+The body is determined by the [update type](#update-types).
+
 ---
 
-## Core Concepts
+## Request Type
 
-### Identifiers
+The request type is a string and must be one of:
 
-In the context of this document, a valid "identifier" is a string containing only the values:
+* `SUBSCRIBE`
+* `UNSUBSCRIBE`
+* `LIST`
 
-* U+0061 to U+007A, "a-z"
-* U+0041 to U+005A, "A-Z"
-* U+0030 to U+0039, "0-9"
+### SUBSCRIBE
 
-The identifier must be unique in the context of the connection session, but do not need to be globally unique.
+Direct the server to inform the client of changes to resources described by one or more paths.
 
-### Subscriptions
+The request payload is an ordered array containing one or more [subscriptions](#subscription), which are arrays containing two properties:
+
+* **Index 0:** The API path to subscribe to.
+* **Index 1:** The *subscription type*.
+
+A successfull response from the server would be a matched-ordered array of [identifiers](#identifiers) which correspond to those subscriptions.
+
+For example, given this request payload:
+
+```json
+[
+	[ "/articles/123", "FULL" ],
+	[ "/authors/456", "DIFF" ]
+]
+```
+
+The server response payload would be an array containing two identifiers. For example:
+
+```json
+[ "001", "002" ]
+```
+
+Each element of the array is an identifier corresponding to the same index of the action payload.
+
+In this example, the identifier `001` would correspond to the subscription `[ "/articles/123" "FULL" ]`, would be used by the client to unsubscribe, and would be included in the updates from the server.
+
+### UNSUBSCRIBE
+
+Direct the server to stop informing the client of changes to resources described by one or more paths.
+
+The payload is an array of [subscription identifiers](#subscription-identifier).
+
+For example:
+
+```json
+[ "001", "002" ]
+```
+
+### LIST
+
+Request the server to send a list of all subscribed paths.
+
+This request does not have a payload.
+
+---
+
+## Subscriptions
 
 When a client subscribes to a path, it is requesting that the server send updates when resources change for that path.
 
@@ -162,7 +227,9 @@ If the client subscribed to the path `/articles/123?include=comments` the follow
 * One or more properties on the comment are changed, added, or removed.
 * The `relationships` property of the article is changed, adding or removing a related comment resource.
 
-### Subscription Types
+---
+
+## Update Types
 
 Subscriptions can be one of these types:
 
@@ -213,156 +280,42 @@ It is a common design pattern that the update to the title will also change prop
 }
 ```
 
+#### `DELETE`
+
+Sent by the server to indicate that a resource or relationship should be removed.
+
+The body must be a valid [JSON:API resource identifier object][json-api-resource-identifier-object].
+
 #### `PING`
 
 The server does not send an object, but will send an empty body on any resource change.
 
 ---
 
-## Client Message Structure
+## Request Identifier
 
-The message sent by the client to the server is an ordered array, with the elements of the array as follows:
+An [identifier string](#identifier-string) which *should* be unique across all requests for the active connection.
 
-* **Index 0:** Message Identifier
-* **Index 1:** Action Name
-* **Index 2:** Action Payload
+---
 
-#### Index 0: Message Identifier
+## Subscription Identifier
 
-Each message sent to the client must start with a valid *identifier*.
+An [identifier string](#identifier-string) which *must* be unique for the [subscription](#subscription), for the active connection.
 
-When the server responds to the request, it will use that same identifier to let the client know which request the response is for.
+For example, if the client mistakenly requests the same subscription twice, the subscription identifier for both would be the same.
 
-#### Index 1: Action Name
+---
 
-The action that the client desires the server to take.
+## Identifier String
 
-Supported actions are:
+In the context of this document, a valid "identifier" is a string containing only the values:
 
-* `subscribe` - Direct the server to inform the client of changes to resources described by one or more paths.
-* `unsubscribe` - Direct the server to stop informing the client of changes to resources described by one or more paths.
-* `list` - Request the server to send a list of all subscribed paths.
+* U+0061 to U+007A, "a-z"
+* U+0041 to U+005A, "A-Z"
+* U+0030 to U+0039, "0-9"
 
-#### Index 2: Action Payload
+The identifier must be unique in the context of the connection session, but do not need to be globally unique.
 
-Each action may include a payload of data, such as a list of paths to subscribe to.
+[json-api-resource]: https://jsonapi.org/format/#document-resource-objects
 
-##### Action Payload: `subscribe`
-
-The payload for the `subscribe` action is an ordered array containing one or more subscription identifiers. These are arrays containing two properties:
-
-* **Index 0:** The API path to subscribe to.
-* **Index 1:** The *subscription type*.
-
-The servers response is a matched-ordered array of *identifiers* which correspond to those subscriptions.
-
-For example, given this *action payload*:
-
-```json
-[
-	[ "/articles/123", "FULL" ],
-	[ "/authors/456", "DIFF" ]
-]
-```
-
-The server response payload would be an array containing two identifiers. For example:
-
-```json
-[ "001", "002" ]
-```
-
-Each element of the array is an identifier corresponding to the same index of the action payload.
-
-In this example, the identifier `001` would correspond to the subscription `[ "/articles/123" "FULL" ]` and would be used to unsubscribe.
-
-##### Action Payload: `unsubscribe`
-
-The payload is an array of subscription *identifiers*.
-
-For example:
-
-```json
-[ "001", "002" ]
-```
-
-##### Action Payload: `list`
-
-The `list` action does not have a payload.
-
-
-
-
-
-
-
-
-
-
-
-
-In pseudo-code you might have something like:
-
-```js
-const identifier = '001'
-socket.publish
-```
-
-
-
-
-
-
-
-
-
-the server REST is JSON API
-	- one big change: no includes?
-the websocket connection can be a different domain (where to document? unspecified)
-
-websocket requests from client are basically subscribe/unsubscribe and list/
-
-```json
-[
-	0, // request id
-	"subscribe", // action
-	// any changes to whatever would have come back
-	[ "FULL", "/some/path" ],
-	// only the complete PATCH as the server finalizes it
-	// aka if you patch field X and the final database write is
-	// field X and Y, this would include both
-	[ "DIFF", "/another/path" ],
-	// no data will be sent, only an alert that the data
-	// has been changed and you will need to re-fetch it
-	[ "PING", "/articles?include=author" ]
-]
-// =>
-[
-	0, // request id, echoed back
-	200, // HTTP-like status TODO needs discussion, it's based on the JSON-API specs
-	"OK", // very short human readable message
-	"Human readable message", // longer human readable message is optional (put 0 here if not used)
-	{ "foo": "bar" } // optional response body
-]
-```
-
-```json
-[
-	1,
-	"unsubscribe",
-	[
-		"/some/path",
-		"/another/path"
-	]
-]
-// =>
-[ 1, 200, "OK", "Human readable message", { "foo": "bar" } ]
-```
-
-```json
-[ 2, "list" ]
-// =>
-[
-	2, // the echoed back id
-	[ "/articles?include=author" ] // the list of active subscriptions
-]
-```
+[json-api-resource-identifier-object]: https://jsonapi.org/format/#document-resource-identifier-objects
