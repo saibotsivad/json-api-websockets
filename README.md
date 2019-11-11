@@ -29,7 +29,7 @@ Messages sent from the client to the server look like this:
 ]
 ```
 
-### Index 0: Message Identifier
+#### Index 0: Message Identifier
 
 Each message sent to the client must specify a valid [request identifier](#request-identifier).
 
