@@ -21,10 +21,23 @@ Messages sent from the client to the server look like this:
 ```json
 [
 	"001",
-	"SUBSCRIBE",
+	"SUB",
 	[
 		[ "/articles/123", "FULL" ],
 		[ "/authors/456", "DIFF" ]
+	]
+]
+```
+
+Or like this:
+
+```json
+[
+	"002",
+	"UNSUB",
+	[
+		"/articles/123",
+		"/authors/456"
 	]
 ]
 ```
@@ -33,7 +46,7 @@ Messages sent from the client to the server look like this:
 
 Each message sent to the client must specify a valid [request identifier](#request-identifier).
 
-Since message passing is asynchronous, the message identifier is included on the server response to let the client connect responses to requests.
+Since message responses are asynchronous and decoupled, the server response includes the message identifier so that the client can connect server responses to client requests.
 
 #### Index 1: Request Type
 
@@ -43,7 +56,7 @@ The client makes requests to the server, such as subscribing or unsubscribing to
 
 #### Index 2: Request Payload
 
-A payload, as defined by the [request type](#request-type), such as a list of paths to subscribe to.
+A payload, as defined by the [request type](#request-type), such as a list of paths to subscribe to or ubsubscribe from.
 
 ---
 
@@ -53,7 +66,7 @@ Messages sent from the server to the client in response to a request look like t
 
 ```json
 [
-	"0",
+	"001",
 	"200",
 	"Subscribed to all paths",
 	[ "100", "101", "102" ]
@@ -70,15 +83,17 @@ The HTTP status code of the response, expressed as a string value.
 
 #### Index 2: Response Title
 
-A short, human-readable summary of the problem that **SHOULD NOT** change from occurrence to occurrence of the problem, except for purposes of localization.
+A short, human-readable summary of the response.
 
 #### Index 3: Response body
 
-The payload response for the request.
+The payload response for the request, as defined by the [request type](#request-type), such as a list of identifiers for subscribed paths.
 
 ---
 
 ## Server Update Structure
+
+The
 
 Resource updates sent from the server to the client look like this:
 
@@ -111,11 +126,11 @@ If the update message is associated with a subscription, this value would be the
 
 #### Index 2: Update Type
 
-The string value of a valid [update type](#update-types).
+The string value of a valid [subscription type](#subscription-types).
 
 #### Index 3: Body
 
-The body is determined by the [update type](#update-types).
+The body is determined by the [subscription type](#subscription-types).
 
 ---
 
@@ -123,20 +138,20 @@ The body is determined by the [update type](#update-types).
 
 The request type is a string and must be one of:
 
-* `SUBSCRIBE`
-* `UNSUBSCRIBE`
+* `SUB`
+* `UNSUB`
 * `LIST`
 
-### SUBSCRIBE
+### `SUB` - Subscribe
 
 Direct the server to inform the client of changes to resources described by one or more paths.
 
-The request payload is an ordered array containing one or more [subscriptions](#subscription), which are arrays containing two properties:
+The request payload is an ordered array containing one or more subscription requests, which are arrays containing two properties:
 
 * **Index 0:** The API path to subscribe to.
-* **Index 1:** The *subscription type*.
+* **Index 1:** The [subscription type](#subscription-types).
 
-A successfull response from the server would be a matched-ordered array of [identifiers](#identifiers) which correspond to those subscriptions.
+A successfull response body from the server would be a matched-ordered array of [identifiers](#identifiers) which correspond to those subscriptions.
 
 For example, given this request payload:
 
@@ -153,9 +168,11 @@ The server response payload would be an array containing two identifiers. For ex
 [ "001", "002" ]
 ```
 
-Each element of the array is an identifier corresponding to the same index of the action payload.
+Each element of the array is an [identifier](#identifier-string) corresponding to the same index of the action payload.
 
-In this example, the identifier `001` would correspond to the subscription `[ "/articles/123" "FULL" ]`, would be used by the client to unsubscribe, and would be included in the updates from the server.
+In this example, the identifier `001` would correspond to the subscription `[ "/articles/123" "FULL" ]`.
+
+That identifier would be used by the client to unsubscribe, and would be included in the updates from the server.
 
 ### UNSUBSCRIBE
 
@@ -229,7 +246,7 @@ If the client subscribed to the path `/articles/123?include=comments` the follow
 
 ---
 
-## Update Types
+## Subscription Types
 
 Subscriptions can be one of these types:
 
@@ -302,7 +319,7 @@ An [identifier string](#identifier-string) which *should* be unique across all r
 
 An [identifier string](#identifier-string) which *must* be unique for the [subscription](#subscription), for the active connection.
 
-For example, if the client mistakenly requests the same subscription twice, the subscription identifier for both would be the same.
+For example, if the client requests the same subscription twice, the subscription identifier for both would be the same.
 
 ---
 
@@ -314,7 +331,7 @@ In the context of this document, a valid "identifier" is a string containing onl
 * U+0041 to U+005A, "A-Z"
 * U+0030 to U+0039, "0-9"
 
-The identifier must be unique in the context of the connection session, but do not need to be globally unique.
+The identifier must be unique in the context of the connection session, but does not need to be globally unique across multiple connections.
 
 [json-api-resource]: https://jsonapi.org/format/#document-resource-objects
 
